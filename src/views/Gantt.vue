@@ -1,21 +1,31 @@
 <script setup lang="ts">
-import { periodView, TOP_HEIGHT } from '@/config/period'
+import { LINE_COLOR, periodView, ROW_PADDING, TASK_HEIGHT, TOP_HEIGHT } from '@/config/period'
 import type { DateItem } from '@/interface/period'
+import { max } from 'lodash'
 import moment from 'moment'
-import { onMounted, ref, type Ref } from 'vue'
+import { computed, onMounted, ref, type Ref } from 'vue'
 
 const buffer = 5
 const wrapStyle = ref({ width: 900, height: 600 })
 const ganttWidth = wrapStyle.value.width
+const GANTT_WIDTH = ganttWidth * 0.6
+const mainContentHeight = computed(() => {
+  return max([taskList.value.length * (TASK_HEIGHT + ROW_PADDING * 2), wrapStyle.value.height - TOP_HEIGHT - 8]) || 0
+})
 
 // heaer_svg的dom
 let headerSvgRef = ref<SVGSVGElement | null>(null)
-// 当前的师徒模式
-const currentView = ref(periodView.dayView)
+// main_svg的dom
+let mainSvgRef = ref<SVGSVGElement | null>(null)
+// 当前的视图模式
+const currentPeriodView = ref(periodView.dayView)
 // 全部日期数据
-const dateData = ref<DateItem[]>(currentView.value.periodFunc())
+const dateData = ref<DateItem[]>(currentPeriodView.value.periodFunc())
 // 可是区域的数据
 const visibleDate = ref<DateItem[]>([])
+const taskList = ref([])
+
+const globalSVGMouseDownEvent = ref<MouseEvent | null>(new MouseEvent('mousedown'))
 
 const initVisibleDate = () => {
   const targetDate = moment()
@@ -29,22 +39,22 @@ const initVisibleDate = () => {
   const day = targetDate.date()
 
   // 展示多少数量
-  const visibleCount = Math.ceil(ganttWidth / currentView.value.baseStepSize)
+  const visibleCount = Math.ceil(ganttWidth / currentPeriodView.value.baseStepSize)
 
-  switch (currentView.value.periodType) {
+  switch (currentPeriodView.value.periodType) {
     case periodView.dayView.periodType:
       todayIndex = dateData.value.findIndex((item) => item.startDate?.isSame(targetDate, 'day'))
       targetX =
         dateData.value[todayIndex]!.startX +
-        (targetDate.isSame(moment(), 'day') ? currentView.value.baseStepSize / 2 : 0)
+        (targetDate.isSame(moment(), 'day') ? currentPeriodView.value.baseStepSize / 2 : 0)
       break
     case periodView.weekView.periodType:
       todayIndex = dateData.value.findIndex((item) => item.week === week && item.year === year)
-      targetX = dateData.value[todayIndex]!.startX + (currentView.value.minStepSize * targetDate.weekday() - 1)
+      targetX = dateData.value[todayIndex]!.startX + (currentPeriodView.value.minStepSize * targetDate.weekday() - 1)
       break
     case periodView.monthView.periodType:
       todayIndex = dateData.value.findIndex((item) => item.month === month && item.year === year)
-      targetX = dateData.value[todayIndex]!.startX + (currentView.value.minStepSize * day - 1)
+      targetX = dateData.value[todayIndex]!.startX + (currentPeriodView.value.minStepSize * day - 1)
       break
     default:
       break
@@ -53,18 +63,73 @@ const initVisibleDate = () => {
   const startIndex = Math.max(Math.floor(todayIndex - visibleCount / 2 - buffer), 0)
   const endIndex = Math.min(startIndex + visibleCount + buffer * 2, dateData.value.length)
 
-  const newCurrentX = targetX - ganttWidth / 2
-  changeSvgViewBox(newCurrentX)
+  const newCurrentX = targetX - GANTT_WIDTH / 2
+  changeSVGAttributes({ newCurrentX })
   visibleDate.value = dateData.value.slice(startIndex, endIndex)
-  console.log('visibleDate :>> ', visibleDate)
 }
 
-const changeSvgViewBox = (newCurrentX: number) => {
-  if (headerSvgRef.value) {
-    const baseVal = headerSvgRef.value.viewBox.baseVal
-    console.log('viewBox :>> ', headerSvgRef)
-    headerSvgRef.value.setAttribute('view-box', `${newCurrentX} ${baseVal.y} ${baseVal.width} ${baseVal.height}`)
+const changeSVGAttributes = ({
+  newCurrentX,
+  ganttWidth,
+  ganttHeight
+}: {
+  newCurrentX: number
+  ganttWidth?: number
+  ganttHeight?: number
+}) => {
+  ;[headerSvgRef, mainSvgRef].forEach((svgRef) => {
+    if (svgRef.value) {
+      const { x, y, width: baseWidth, height: baseHeight } = svgRef.value.viewBox.baseVal
+
+      const width = ganttWidth ?? baseWidth
+      const height = svgRef === mainSvgRef ? (ganttHeight ?? baseHeight) : baseHeight
+      const viewBoxX = newCurrentX ?? x
+
+      svgRef.value.setAttribute('width', `${width}`)
+      svgRef.value.setAttribute('height', `${height}`)
+      svgRef.value.setAttribute('viewBox', `${viewBoxX} ${y} ${width} ${height}`)
+    }
+  })
+}
+
+const handleScroll = ({ deltaX, deltaY }: { deltaX: number; deltaY: number }) => {
+  if (mainSvgRef.value) {
+    const mainSVGBaseVal = mainSvgRef.value.viewBox.baseVal
+    const newCurrentX = deltaX ? mainSVGBaseVal.x + deltaX : mainSVGBaseVal.x
+    const newCurrentY = deltaY ? mainSVGBaseVal.y + deltaY : mainSVGBaseVal.y
+    const startId = Math.max(
+      Math.floor(newCurrentX / currentPeriodView.value.baseStepSize) -
+        (newCurrentX < visibleDate.value[1].startX ? buffer * 2 : buffer),
+      0
+    )
+    const endId = Math.min(
+      startId + Math.ceil(ganttWidth / currentPeriodView.value.baseStepSize) + buffer * 2,
+      dateData.value.length
+    )
+    visibleDate.value = dateData.value.slice(startId, endId)
+    changeSVGAttributes({ newCurrentX })
   }
+}
+
+const endMove = () => {
+  globalSVGMouseDownEvent.value = null
+}
+
+const handleMouseMove = (event: MouseEvent) => {
+  if (!globalSVGMouseDownEvent.value) return
+  handleScroll({
+    deltaX: -(event.clientX - globalSVGMouseDownEvent.value.clientX),
+    deltaY: -(event.clientY - globalSVGMouseDownEvent.value.clientY)
+  })
+  globalSVGMouseDownEvent.value = event
+}
+
+const handleMouseDown = (e: MouseEvent) => {
+  globalSVGMouseDownEvent.value = e
+}
+
+const handleMouseLeave = () => {
+  endMove()
 }
 
 onMounted(() => {
@@ -73,34 +138,53 @@ onMounted(() => {
 </script>
 
 <template>
-  <div>
-    <svg
-      ref="headerSvgRef"
-      :width="ganttWidth * 0.6"
-      :height="TOP_HEIGHT"
-      fill="blue"
-      stroke="red"
-      :view-box="`0 0 ${ganttWidth * 0.6} ${TOP_HEIGHT}`"
-      stroke-width="2"
-      :style="{ cursor: 'ew-resize', userSelect: 'none' }"
-    >
-      <g v-for="(t, i) in visibleDate" :key="t.endX">
-        <!-- <g :key="t.startX"> -->
-        <line :x1="t.startX" y1="50%" :x2="t.startX" y2="100%" stroke-width="1" stroke="red"></line>
-        <line :x1="t.startX" y1="100%" :x2="t.endX" y2="100%" stroke-width="1" stroke="red"></line>
-        <line :x1="t.startX" y1="50%" :x2="t.endX" y2="50%" stroke-width="1" stroke="red"></line>
-        <!-- </g> -->
-        <!-- <rect
-          :x="t.firstColX"
-          y="0"
-          :width="currentView.periodType === periodView.monthView.periodType ? 49 : 81"
-          height="50%"
-          stroke="#fff"
-          fill="#fff"
-        ></rect> -->
-      </g>
-    </svg>
+  <div
+    :style="{ width: ganttWidth, height: `${mainContentHeight + TOP_HEIGHT}px` }"
+    @mousemove="handleMouseMove"
+    @mousedown="handleMouseDown"
+    @mouseleave="handleMouseLeave"
+    @mouseup="handleMouseLeave"
+  >
+    <div class="gantt-header">
+      <svg
+        ref="headerSvgRef"
+        :width="GANTT_WIDTH"
+        :height="TOP_HEIGHT"
+        :viewBox="`0 0 ${GANTT_WIDTH} ${TOP_HEIGHT}`"
+        stroke-width="1"
+        :style="{ cursor: 'ew-resize', userSelect: 'none' }"
+      >
+        <g v-for="(t, i) in visibleDate.filter((t) => t.firstCol)" :key="t.startX">
+          <rect
+            :x="t.firstColX"
+            y="0"
+            height="50%"
+            :width="currentPeriodView.periodType === periodView.monthView.periodType ? 49 : 81"
+            stroke="#fff"
+            fill="#fff"
+          ></rect>
+          <text :x="t.firstColX + 5" y="25%" alignmentBaseline="central" stroke="#fff" fill="#fff">
+            {{ t.gatherText }}
+          </text>
+          <line :x1="t.firstColX" y1="0" :x2="t.firstColX" y2="50%" stroke-width="1" :stroke="LINE_COLOR"></line>
+        </g>
+
+        <g v-for="(t, i) in visibleDate" :key="t.startX">
+          <line :x1="t.startX" y1="50%" :x2="t.startX" y2="100%" stroke-width="1" :stroke="LINE_COLOR"></line>
+          <line :x1="t.startX" y1="100%" :x2="t.endX" y2="100%" stroke-width="1" :stroke="LINE_COLOR"></line>
+          <line :x1="t.startX" y1="50%" :x2="t.endX" y2="50%" stroke-width="1" :stroke="LINE_COLOR"></line>
+          <g>
+            <foreignObject :x="t.startX" y="50%" :width="t.endX - t.startX" height="20px">
+              <span class="header-second-title">{{ t.itemText }}</span>
+            </foreignObject>
+          </g>
+        </g>
+      </svg>
+    </div>
+    <svg ref="mainSvgRef" viewBox="0 0 0 0" height="0" width="0"></svg>
   </div>
 </template>
 
-<style lang="scss" scoped></style>
+<style lang="scss" scoped>
+@import url('./index.scss');
+</style>

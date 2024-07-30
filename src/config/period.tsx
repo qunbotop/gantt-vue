@@ -97,9 +97,7 @@ export const periodView: PeriodViewMap = {
             itemText: `第${currentWeekEnd.isoWeek()}周 ${currentWeekStart.format('M/DD')}~${currentWeekEnd.format('M/DD')}`,
             firstCol: isFirstCol,
             firstColX: isFirstCol
-              ? currentWeekEnd.clone().startOf('month').diff(currentWeekStart, 'day') *
-                  this.minStepSize +
-                x
+              ? currentWeekEnd.clone().startOf('month').diff(currentWeekStart, 'day') * this.minStepSize + x
               : 0,
             startX: x,
             endX: x + this.baseStepSize
