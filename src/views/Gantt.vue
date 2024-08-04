@@ -3,7 +3,11 @@ import { LINE_COLOR, periodView, ROW_PADDING, TASK_HEIGHT, TOP_HEIGHT } from '@/
 import type { DateItem } from '@/interface/period'
 import { max } from 'lodash'
 import moment from 'moment'
-import { computed, onMounted, ref, type Ref } from 'vue'
+import { computed, onMounted, ref, watch, watchEffect, type Ref } from 'vue'
+import TaskItem from '@/components/TaskItem/Index.vue'
+import { taskListMock } from '@/mock/taskList'
+import { TaskModel, type TaskDraggedInfoProps } from '@/interface/task'
+import { calculatedTaskList } from '@/utils'
 
 const buffer = 5
 const wrapStyle = ref({ width: 900, height: 600 })
@@ -23,7 +27,19 @@ const currentPeriodView = ref(periodView.dayView)
 const dateData = ref<DateItem[]>(currentPeriodView.value.periodFunc())
 // 可是区域的数据
 const visibleDate = ref<DateItem[]>([])
-const taskList = ref([])
+// 用户是否拖拽了任务条，涉及的信息，拖拽的位置、是否拖拽、拖拽开始的clientX
+const isTaskItemDraggedInfo = ref<TaskDraggedInfoProps>({
+  initalLocation: 'OUTER',
+  isTaskItemDragged: false,
+  dragStartClientX: 0
+})
+
+const taskList = ref<Array<TaskModel>>([])
+
+watchEffect(() => {
+  const _taskList = taskListMock.map((t) => new TaskModel(t))
+  taskList.value = calculatedTaskList({ taskList: _taskList, dateList: dateData.value, view: currentPeriodView.value })
+})
 
 const globalSVGMouseDownEvent = ref<MouseEvent | null>(new MouseEvent('mousedown'))
 
@@ -70,8 +86,8 @@ const initVisibleDate = () => {
 
 const changeSVGAttributes = ({
   newCurrentX,
-  ganttWidth,
-  ganttHeight
+  ganttWidth = GANTT_WIDTH,
+  ganttHeight = mainContentHeight.value
 }: {
   newCurrentX: number
   ganttWidth?: number
@@ -160,10 +176,9 @@ onMounted(() => {
             y="0"
             height="50%"
             :width="currentPeriodView.periodType === periodView.monthView.periodType ? 49 : 81"
-            stroke="#fff"
-            fill="#fff"
+            :stroke="LINE_COLOR"
           ></rect>
-          <text :x="t.firstColX + 5" y="25%" alignmentBaseline="central" stroke="#fff" fill="#fff">
+          <text :x="t.firstColX + 5" y="25%" alignmentBaseline="central" :stroke="LINE_COLOR">
             {{ t.gatherText }}
           </text>
           <line :x1="t.firstColX" y1="0" :x2="t.firstColX" y2="50%" stroke-width="1" :stroke="LINE_COLOR"></line>
@@ -181,7 +196,12 @@ onMounted(() => {
         </g>
       </svg>
     </div>
-    <svg ref="mainSvgRef" viewBox="0 0 0 0" height="0" width="0"></svg>
+    <svg ref="mainSvgRef" viewBox="0 0 0 0" stroke-width="1" height="0" width="0">
+      <!-- 任务条 -->
+      <g v-for="(task, index) in taskList" :key="task.id">
+        <TaskItem :task="task" :isTaskItemDraggedInfo="isTaskItemDraggedInfo" />
+      </g>
+    </svg>
   </div>
 </template>
 

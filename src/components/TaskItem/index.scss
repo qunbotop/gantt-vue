@@ -1,0 +1,16 @@
+.task-item-group {
+  .task-item {
+    stroke: rgb(151, 186, 248);
+    fill: rgb(230, 238, 252);
+  }
+  &:hover {
+    .task-item-bar {
+      opacity: 1;
+      transition: opacity 0.3s linear;
+    }
+  }
+  .task-item-bar {
+    opacity: 0;
+    transition: opacity 0.3s linear;
+  }
+}
